@@ -1,3 +1,12 @@
 {
-  "users": []
+  "users": [
+    {
+      "telegram_id": 907861430,
+      "role": "owner",
+      "name": "WizzardKing",
+      "username": "WizzardKing",
+      "created_at": "2026-06-23T00:00:00+00:00",
+      "updated_at": "2026-06-23T00:00:00+00:00"
+    }
+  ]
 }
