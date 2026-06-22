@@ -2,53 +2,47 @@
 setlocal
 
 REM =========================
-REM WIZZARD NAILS BOT DEPLOY
+REM NAILS BOT ONE-CLICK DEPLOY
 REM =========================
 
-REM VPS
 set "SERVER_USER=root"
 set "SERVER_HOST=144.31.239.83"
-
-REM Скрипт на VPS
 set "REMOTE_DEPLOY=/opt/deploy-nails-bot.sh"
 
-REM Сообщение коммита. Можно запускать так:
-REM deploy.bat "added new buttons"
+REM Если передал сообщение коммита:
+REM deploy.bat "fixed menu"
 set "COMMIT_MSG=%~1"
 if "%COMMIT_MSG%"=="" set "COMMIT_MSG=auto deploy"
 
 echo.
-echo === LOCAL: go to project folder ===
+echo =========================
+echo  NAILS BOT DEPLOY START
+echo =========================
+
+echo.
+echo === LOCAL: project folder ===
 cd /d "%~dp0" || (
     echo ERROR: cannot open project folder
     pause
     exit /b 1
 )
 
-echo.
-echo === LOCAL: current folder ===
 cd
 
 echo.
-echo === LOCAL: current branch ===
+echo === LOCAL: git branch ===
 for /f "tokens=*" %%i in ('git branch --show-current') do set "BRANCH=%%i"
+
 if "%BRANCH%"=="" (
     echo ERROR: cannot detect git branch
     pause
     exit /b 1
 )
+
 echo Branch: %BRANCH%
 
 echo.
-echo === LOCAL: git status ===
-git status || (
-    echo ERROR: git status failed
-    pause
-    exit /b 1
-)
-
-echo.
-echo === LOCAL: add all changes ===
+echo === LOCAL: git add ===
 git add -A || (
     echo ERROR: git add failed
     pause
@@ -56,7 +50,7 @@ git add -A || (
 )
 
 echo.
-echo === LOCAL: commit if changed ===
+echo === LOCAL: git commit ===
 git diff --cached --quiet
 if errorlevel 1 (
     git commit -m "%COMMIT_MSG%" || (
@@ -69,7 +63,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo === LOCAL: push ===
+echo === LOCAL: git push ===
 git push origin %BRANCH% || (
     echo ERROR: git push failed
     pause
@@ -77,13 +71,16 @@ git push origin %BRANCH% || (
 )
 
 echo.
-echo === REMOTE: deploy on VPS ===
+echo === VPS: remote deploy ===
 ssh %SERVER_USER%@%SERVER_HOST% "bash %REMOTE_DEPLOY%" || (
-    echo ERROR: remote deploy failed
+    echo ERROR: VPS deploy failed
     pause
     exit /b 1
 )
 
 echo.
-echo === DONE ===
+echo =========================
+echo  DEPLOY SUCCESS
+echo =========================
+echo.
 pause
