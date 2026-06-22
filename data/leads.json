@@ -1,0 +1,35 @@
+[
+  {
+    "id": "2a5cddbc80",
+    "created_at": "2026-06-20T16:00:53+00:00",
+    "source": "Рекомендация подруги",
+    "user": {
+      "id": 907861430,
+      "first_name": "Wizzard",
+      "last_name": null,
+      "username": "WizzardKing"
+    }
+  },
+  {
+    "id": "db96912783",
+    "created_at": "2026-06-20T17:50:19+00:00",
+    "source": "Instagram",
+    "user": {
+      "id": 907861430,
+      "first_name": "Wizzard",
+      "last_name": null,
+      "username": "WizzardKing"
+    }
+  },
+  {
+    "id": "fce31971b9",
+    "created_at": "2026-06-20T19:12:45+00:00",
+    "source": "Рекомендация подруги",
+    "user": {
+      "id": 682936933,
+      "first_name": "Nickolay",
+      "last_name": null,
+      "username": "Hoo_kah"
+    }
+  }
+]

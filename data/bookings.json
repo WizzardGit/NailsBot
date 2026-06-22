@@ -1,0 +1,46 @@
+[
+  {
+    "id": "433c7359bc",
+    "status": "confirmed",
+    "created_at": "2026-06-20T17:50:58+00:00",
+    "service": {
+      "id": "gel_manicure",
+      "title": "Маникюр + покрытие",
+      "price": 2500,
+      "duration_min": 90,
+      "description": "Маникюр, выравнивание, гель-лак и стойкий глянец без перегруза."
+    },
+    "date": "2026-07-01",
+    "time": "10:00",
+    "client_name": "Света",
+    "client_phone": "+79602512057",
+    "telegram_user": {
+      "id": 907861430,
+      "first_name": "Wizzard",
+      "last_name": null,
+      "username": "WizzardKing"
+    }
+  },
+  {
+    "id": "b0735a26a2",
+    "status": "confirmed",
+    "created_at": "2026-06-20T19:13:48+00:00",
+    "service": {
+      "id": "classic_manicure",
+      "title": "Маникюр без покрытия",
+      "price": 1500,
+      "duration_min": 60,
+      "description": "Аккуратная обработка кутикулы, форма ногтей, легкий уход в финале."
+    },
+    "date": "2026-06-25",
+    "time": "10:00",
+    "client_name": "Анна",
+    "client_phone": "+7 999 123-45-67",
+    "telegram_user": {
+      "id": 682936933,
+      "first_name": "Nickolay",
+      "last_name": null,
+      "username": "Hoo_kah"
+    }
+  }
+]

@@ -1,0 +1,53 @@
+[
+  {
+    "id": "manicure",
+    "title": "Маникюр",
+    "works": [
+      {
+        "caption": "Молочная база, мягкий квадрат, чистый глянец.",
+        "photo_url": "https://images.unsplash.com/photo-1604654894610-df63bc536371?auto=format&fit=crop&w=1200&q=80"
+      },
+      {
+        "caption": "Нюдовый тон и аккуратная короткая длина на каждый день.",
+        "photo_url": "https://images.unsplash.com/photo-1607779097040-26e80aa78e66?auto=format&fit=crop&w=1200&q=80"
+      },
+      {
+        "caption": "Красное покрытие с ровной линией у кутикулы.",
+        "photo_url": "https://images.unsplash.com/photo-1599206676335-193c82b13c9e?auto=format&fit=crop&w=1200&q=80"
+      }
+    ]
+  },
+  {
+    "id": "pedicure",
+    "title": "Педикюр",
+    "works": [
+      {
+        "caption": "Классический педикюр с плотным молочным покрытием.",
+        "photo_url": "https://images.unsplash.com/photo-1519014816548-bf5fe059798b?auto=format&fit=crop&w=1200&q=80"
+      },
+      {
+        "caption": "Гигиеничная обработка и спокойный оттенок без визуального шума.",
+        "photo_url": "https://images.unsplash.com/photo-1610992015732-2449b76344bc?auto=format&fit=crop&w=1200&q=80"
+      }
+    ]
+  },
+  {
+    "id": "design",
+    "title": "Дизайн",
+    "works": [
+      {
+        "caption": "Минималистичные акценты, которые не надоедают через неделю.",
+        "photo_url": "https://images.unsplash.com/photo-1610992015742-2449b0dd683b?auto=format&fit=crop&w=1200&q=80"
+      },
+      {
+        "caption": "Френч и деликатная геометрия под офисный образ.",
+        "photo_url": "https://images.unsplash.com/photo-1610992015732-2449b76344bc?auto=format&fit=crop&w=1200&q=80"
+      },
+      {
+        "caption": "Светлая база с маленькими сезонными деталями.",
+        "photo_url": "https://images.unsplash.com/photo-1610992015781-3d3272b08805?auto=format&fit=crop&w=1200&q=80"
+      }
+    ]
+  }
+]
+
