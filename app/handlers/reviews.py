@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery, Message
 
 from app.config import BotConfig
 from app.keyboards import moderation_kb, rating_kb, review_nav_kb
+from app.permissions import has_permission, notification_recipients
 from app.states import ReviewStates
 from app.storage import JsonStore
 from app.texts import MENU_REVIEWS, review_text, user_payload
@@ -79,21 +80,21 @@ async def capture_review_text(message: Message, state: FSMContext, store: JsonSt
     await state.clear()
     await message.answer("Спасибо! Отзыв отправлен мастеру на модерацию.")
 
-    if config.master_chat_id is not None:
-        stars = "★" * int(review["rating"])
+    stars = "★" * int(review["rating"])
+    for admin_id in await notification_recipients(store, config):
         try:
             await message.bot.send_message(
-                config.master_chat_id,
+                admin_id,
                 f"<b>Новый отзыв</b>\n\n{stars}\n«{escape(review['text'])}»\n\n— {escape(review['name'])}",
                 reply_markup=moderation_kb(review["id"]),
             )
         except TelegramAPIError as exc:
-            logger.warning("Could not notify master chat %s: %s", config.master_chat_id, exc)
+            logger.warning("Could not notify admin %s about review: %s", admin_id, exc)
 
 
 @router.callback_query(F.data.startswith("review:publish:"))
-async def publish_review(callback: CallbackQuery, store: JsonStore, config: BotConfig) -> None:
-    if callback.from_user.id not in config.admin_ids:
+async def publish_review(callback: CallbackQuery, store: JsonStore) -> None:
+    if not await has_permission(callback.from_user.id, "manage_reviews", store):
         await callback.answer("Недоступно", show_alert=True)
         return
     review_id = callback.data.rsplit(":", 1)[1]
@@ -102,8 +103,8 @@ async def publish_review(callback: CallbackQuery, store: JsonStore, config: BotC
 
 
 @router.callback_query(F.data.startswith("review:hide:"))
-async def hide_review(callback: CallbackQuery, store: JsonStore, config: BotConfig) -> None:
-    if callback.from_user.id not in config.admin_ids:
+async def hide_review(callback: CallbackQuery, store: JsonStore) -> None:
+    if not await has_permission(callback.from_user.id, "manage_reviews", store):
         await callback.answer("Недоступно", show_alert=True)
         return
     review_id = callback.data.rsplit(":", 1)[1]

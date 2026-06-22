@@ -12,6 +12,7 @@ from aiogram.types import CallbackQuery, Message
 
 from app.config import BotConfig
 from app.keyboards import (
+    admin_booking_notice_kb,
     booking_calendar_kb,
     confirm_booking_kb,
     contact_request_kb,
@@ -19,7 +20,8 @@ from app.keyboards import (
     services_kb,
     time_slots_kb,
 )
-from app.schedule import TIME_SLOTS, human_date, is_workday, today_in
+from app.permissions import notification_recipients
+from app.schedule import TIME_SLOTS, calculate_end_time, human_date, is_workday, today_in
 from app.states import BookingStates
 from app.storage import JsonStore
 from app.texts import (
@@ -31,6 +33,7 @@ from app.texts import (
     booking_intro,
     booking_success,
     home_text,
+    selected_services_text,
     user_payload,
 )
 
@@ -53,35 +56,69 @@ async def booking_from_callback(callback: CallbackQuery, state: FSMContext, stor
 
 @router.callback_query(F.data == "book:services")
 async def booking_services_back(callback: CallbackQuery, state: FSMContext, store: JsonStore) -> None:
-    services = await store.load("services.json", [])
-    await state.set_state(BookingStates.choosing_service)
-    await callback.message.edit_text(booking_intro(), reply_markup=services_kb(services))
+    services = await store.list_services()
+    data = await state.get_data()
+    selected_ids = list(data.get("selected_service_ids", []))
+    await state.set_state(BookingStates.choosing_services)
+    await callback.message.edit_text(
+        selected_services_text(services, selected_ids),
+        reply_markup=services_kb(services, selected_ids),
+    )
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("book:service:"))
-async def choose_service(callback: CallbackQuery, state: FSMContext, store: JsonStore, config: BotConfig) -> None:
-    service_id = callback.data.removeprefix("book:service:")
-    services = await store.load("services.json", [])
-    service = next((item for item in services if item["id"] == service_id), None)
-    if service is None:
-        await callback.answer("Услуга не найдена", show_alert=True)
+@router.callback_query(F.data.startswith("book:svc:"))
+async def toggle_service(callback: CallbackQuery, state: FSMContext, store: JsonStore) -> None:
+    service_id = callback.data.removeprefix("book:svc:")
+    services = await store.list_services()
+    if not any(item["id"] == service_id for item in services):
+        await callback.answer("Услуга недоступна", show_alert=True)
         return
 
-    await state.update_data(service=service)
+    data = await state.get_data()
+    selected_ids = list(data.get("selected_service_ids", []))
+    if service_id in selected_ids:
+        selected_ids.remove(service_id)
+    else:
+        selected_ids.append(service_id)
+    await state.update_data(selected_service_ids=selected_ids)
+    await state.set_state(BookingStates.choosing_services)
+    await callback.message.edit_text(
+        selected_services_text(services, selected_ids),
+        reply_markup=services_kb(services, selected_ids),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "book:clear")
+async def clear_services(callback: CallbackQuery, state: FSMContext, store: JsonStore) -> None:
+    services = await store.list_services()
+    await state.update_data(selected_service_ids=[])
+    await state.set_state(BookingStates.choosing_services)
+    await callback.message.edit_text(selected_services_text(services, []), reply_markup=services_kb(services, []))
+    await callback.answer("Выбор очищен")
+
+
+@router.callback_query(F.data == "book:continue")
+async def continue_to_date(callback: CallbackQuery, state: FSMContext, store: JsonStore, config: BotConfig) -> None:
+    selected = await selected_services_from_state(state, store)
+    if not selected:
+        await callback.answer("Выберите хотя бы одну услугу", show_alert=True)
+        return
+    await state.update_data(services=selected)
     await state.set_state(BookingStates.choosing_date)
-    await send_calendar(callback, store, config)
+    await send_calendar(callback, state, store, config)
 
 
 @router.callback_query(F.data.startswith("book:month:"))
 async def change_booking_month(callback: CallbackQuery, state: FSMContext, store: JsonStore, config: BotConfig) -> None:
-    await send_calendar(callback, store, config)
+    await send_calendar(callback, state, store, config)
 
 
 @router.callback_query(F.data == "book:change_date")
 async def change_booking_date(callback: CallbackQuery, state: FSMContext, store: JsonStore, config: BotConfig) -> None:
     await state.set_state(BookingStates.choosing_date)
-    await send_calendar(callback, store, config)
+    await send_calendar(callback, state, store, config)
 
 
 @router.callback_query(F.data.startswith("book:date:"))
@@ -90,14 +127,16 @@ async def choose_date(callback: CallbackQuery, state: FSMContext, store: JsonSto
     selected_date = date.fromisoformat(date_iso)
     today = today_in(config.timezone)
     horizon_end = today + timedelta(days=config.booking_horizon_days)
-    blocked_dates = set(await store.load("blocked_dates.json", []))
-    booked_times = await store.booked_times(date_iso)
+    blocked_dates = set(await store.list_blocked_dates())
+    selected = await selected_services_from_state(state, store)
+    duration = total_duration(selected)
 
     if selected_date < today or selected_date > horizon_end or not is_workday(selected_date):
         await callback.answer("Эта дата недоступна для записи", show_alert=True)
         return
 
-    if date_iso in blocked_dates or len(booked_times) >= len(TIME_SLOTS):
+    available_slots = await store.available_time_slots(date_iso, duration)
+    if date_iso in blocked_dates or not available_slots:
         await callback.answer("На эту дату уже нет свободных окон", show_alert=True)
         return
 
@@ -106,8 +145,8 @@ async def choose_date(callback: CallbackQuery, state: FSMContext, store: JsonSto
     await callback.message.edit_text(
         f"<b>{human_date(date_iso)}</b>\n"
         "Выберите свободное время.\n"
-        "× — время уже занято.",
-        reply_markup=time_slots_kb(booked_times),
+        "× — время уже занято или запись не помещается по длительности.",
+        reply_markup=time_slots_kb(available_slots),
     )
     await callback.answer()
 
@@ -125,12 +164,14 @@ async def choose_time(callback: CallbackQuery, state: FSMContext, store: JsonSto
         await callback.answer("Сначала выберите дату", show_alert=True)
         return
 
-    booked_times = await store.booked_times(date_iso)
-    if time_slot in booked_times:
-        await callback.answer("Это время уже заняли", show_alert=True)
+    selected = await selected_services_from_state(state, store)
+    duration = total_duration(selected)
+    available_slots = await store.available_time_slots(date_iso, duration)
+    if time_slot not in available_slots:
+        await callback.answer("Это время уже заняли или запись не помещается", show_alert=True)
         return
 
-    await state.update_data(time=time_slot)
+    await state.update_data(time=time_slot, start_time=time_slot, end_time=calculate_end_time(time_slot, duration), services=selected)
     await state.set_state(BookingStates.waiting_contact)
     await callback.message.answer(ask_contact_text(), reply_markup=contact_request_kb())
     await callback.answer()
@@ -157,25 +198,35 @@ async def capture_contact(message: Message, state: FSMContext) -> None:
 @router.callback_query(F.data == "book:confirm")
 async def confirm_booking(callback: CallbackQuery, state: FSMContext, store: JsonStore, config: BotConfig) -> None:
     data = await state.get_data()
-    required = {"service", "date", "time", "client_name", "client_phone"}
+    required = {"selected_service_ids", "date", "time", "client_name", "client_phone"}
     if not required.issubset(data):
         await callback.answer("Данные записи устарели. Начните заново.", show_alert=True)
         await state.clear()
         return
 
-    if data["time"] not in TIME_SLOTS:
-        await callback.answer("Время записи некорректно. Выберите слот заново.", show_alert=True)
+    services = await selected_services_from_state(state, store)
+    if not services:
+        await callback.answer("Выбранные услуги больше недоступны. Начните заново.", show_alert=True)
         await state.clear()
         return
 
-    booking = await store.add_booking_if_free(
+    duration = total_duration(services)
+    start_time = data["time"]
+    end_time = calculate_end_time(start_time, duration)
+    booking = await store.create_booking_if_free(
         {
-            "service": data["service"],
             "date": data["date"],
-            "time": data["time"],
-            "client_name": data["client_name"],
-            "client_phone": data["client_phone"],
-            "telegram_user": user_payload(callback.from_user),
+            "start_time": start_time,
+            "end_time": end_time,
+            "total_duration_min": duration,
+            "total_price": total_price(services),
+            "services": services,
+            "client": telegram_client(callback.from_user),
+            "contact": {
+                "name": data["client_name"],
+                "phone": data["client_phone"],
+            },
+            "notes": "",
         }
     )
     if booking is None:
@@ -189,11 +240,15 @@ async def confirm_booking(callback: CallbackQuery, state: FSMContext, store: Jso
 
     await state.clear()
     await callback.message.answer(booking_success(booking), reply_markup=main_menu_kb())
-    if config.master_chat_id is not None:
+    for admin_id in await notification_recipients(store, config):
         try:
-            await callback.bot.send_message(config.master_chat_id, admin_booking_notice(booking))
+            await callback.bot.send_message(
+                admin_id,
+                admin_booking_notice(booking),
+                reply_markup=admin_booking_notice_kb(booking),
+            )
         except TelegramAPIError as exc:
-            logger.warning("Could not notify master chat %s: %s", config.master_chat_id, exc)
+            logger.warning("Could not notify admin %s: %s", admin_id, exc)
     await callback.answer("Запись подтверждена")
 
 
@@ -213,29 +268,53 @@ async def noop(callback: CallbackQuery) -> None:
 
 
 async def show_services(message: Message, state: FSMContext, store: JsonStore) -> None:
-    services = await store.load("services.json", [])
-    await state.set_state(BookingStates.choosing_service)
-    await message.answer(booking_intro(), reply_markup=services_kb(services))
+    services = await store.list_services()
+    await state.clear()
+    if not services:
+        await message.answer("Сейчас нет активных услуг для записи. Пожалуйста, попробуйте позже.", reply_markup=main_menu_kb())
+        return
+    await state.update_data(selected_service_ids=[])
+    await state.set_state(BookingStates.choosing_services)
+    await message.answer(f"{booking_intro()}\n\n{selected_services_text(services, [])}", reply_markup=services_kb(services, []))
 
 
-async def send_calendar(callback: CallbackQuery, store: JsonStore, config: BotConfig) -> None:
+async def send_calendar(callback: CallbackQuery, state: FSMContext, store: JsonStore, config: BotConfig) -> None:
     current_month = callback.data.removeprefix("book:month:") if callback.data and callback.data.startswith("book:month:") else None
     today = today_in(config.timezone)
     horizon_end = today + timedelta(days=config.booking_horizon_days)
     year, month = (map(int, current_month.split("-")) if current_month else (today.year, today.month))
-    bookings = await store.load("bookings.json", [])
-    blocked_dates = set(await store.load("blocked_dates.json", []))
-    booked_by_date = booked_dates_map(bookings)
-    markup = booking_calendar_kb(year, month, today, horizon_end, booked_by_date, blocked_dates)
+    selected = await selected_services_from_state(state, store)
+    duration = total_duration(selected)
+    blocked_dates = set(await store.list_blocked_dates())
+    unavailable_by_date = await unavailable_slots_map(store, today, horizon_end, duration)
+    markup = booking_calendar_kb(year, month, today, horizon_end, unavailable_by_date, blocked_dates)
     await callback.message.edit_text(
         "Выберите дату.\n\n"
         "Обычные числа — доступные дни.\n"
         "× — мест нет или дата закрыта.\n"
-        "· — выходной.\n"
-        "Пустые клетки — прошедшие даты или даты вне периода записи.",
+        "· — выходной.",
         reply_markup=markup,
     )
     await callback.answer()
+
+
+async def unavailable_slots_map(store: JsonStore, start: date, end: date, duration_min: int) -> dict[str, set[str]]:
+    result: dict[str, set[str]] = {}
+    current = start
+    while current <= end:
+        day = current.isoformat()
+        available = set(await store.available_time_slots(day, duration_min))
+        result[day] = {slot for slot in TIME_SLOTS if slot not in available}
+        current += timedelta(days=1)
+    return result
+
+
+async def selected_services_from_state(state: FSMContext, store: JsonStore) -> list[dict[str, Any]]:
+    data = await state.get_data()
+    selected_ids = list(data.get("selected_service_ids", []))
+    services = await store.list_services()
+    by_id = {item["id"]: item for item in services}
+    return [by_id[service_id] for service_id in selected_ids if service_id in by_id]
 
 
 def booked_dates_map(bookings: list[dict[str, Any]]) -> dict[str, set[str]]:
@@ -243,10 +322,9 @@ def booked_dates_map(bookings: list[dict[str, Any]]) -> dict[str, set[str]]:
     for booking in bookings:
         if booking.get("status") != "confirmed":
             continue
-        time_slot = booking.get("time")
-        if time_slot not in TIME_SLOTS:
-            continue
-        result.setdefault(booking["date"], set()).add(time_slot)
+        time_slot = booking.get("start_time") or booking.get("time")
+        if time_slot in TIME_SLOTS:
+            result.setdefault(booking["date"], set()).add(time_slot)
     return result
 
 
@@ -267,3 +345,23 @@ def extract_contact(message: Message) -> tuple[str, str | None]:
     if not name and message.from_user:
         name = message.from_user.full_name
     return name or "Клиент", phone
+
+
+def telegram_client(user: Any) -> dict[str, Any]:
+    payload = user_payload(user)
+    display_name = " ".join(part for part in [payload.get("first_name"), payload.get("last_name")] if part).strip()
+    return {
+        "telegram_id": payload["telegram_id"],
+        "username": payload.get("username") or "",
+        "first_name": payload.get("first_name") or "",
+        "last_name": payload.get("last_name") or "",
+        "display_name": display_name or payload.get("username") or f"id {payload['telegram_id']}",
+    }
+
+
+def total_duration(services: list[dict[str, Any]]) -> int:
+    return sum(int(item.get("duration_min", 0)) for item in services)
+
+
+def total_price(services: list[dict[str, Any]]) -> int:
+    return sum(int(item.get("price", 0)) for item in services)

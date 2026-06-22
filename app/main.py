@@ -20,7 +20,11 @@ async def main() -> None:
 
     config = load_config()
     store = JsonStore(config.data_dir)
-    await store.ensure_files()
+    await store.ensure_files(
+        owner_id=config.owner_id,
+        master_chat_id=config.master_chat_id,
+        admin_ids=config.admin_ids,
+    )
 
     bot = Bot(token=config.token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     try:

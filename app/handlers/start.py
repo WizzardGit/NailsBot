@@ -22,22 +22,25 @@ SOURCE_LABELS = {
 
 
 @router.message(CommandStart())
-async def command_start(message: Message, state: FSMContext, config: BotConfig) -> None:
+async def command_start(message: Message, state: FSMContext, config: BotConfig, store: JsonStore) -> None:
     await state.clear()
+    await store.touch_admin_profile(message.from_user)
     await message.answer(welcome_text(config.brand_name), reply_markup=lead_source_kb())
 
 
 @router.message(Command("menu"))
-async def command_menu(message: Message, state: FSMContext, config: BotConfig) -> None:
+async def command_menu(message: Message, state: FSMContext, config: BotConfig, store: JsonStore) -> None:
     await state.clear()
+    await store.touch_admin_profile(message.from_user)
     await message.answer(home_text(config.brand_name), reply_markup=main_menu_kb())
 
 
 @router.message(Command("myid"))
-async def command_myid(message: Message) -> None:
+async def command_myid(message: Message, store: JsonStore) -> None:
+    await store.touch_admin_profile(message.from_user)
     await message.answer(
         f"Ваш Telegram ID: <code>{message.from_user.id}</code>\n"
-        "Вставьте его в .env в MASTER_CHAT_ID и ADMIN_IDS."
+        "Если вы настраиваете бота впервые, укажите этот ID в OWNER_ID или отправьте его владельцу для назначения роли."
     )
 
 

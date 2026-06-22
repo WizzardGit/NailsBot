@@ -16,6 +16,7 @@ PLACEHOLDER_IDS = {123456789}
 @dataclass(frozen=True)
 class BotConfig:
     token: str
+    owner_id: int | None
     master_chat_id: int | None
     admin_ids: set[int]
     timezone: ZoneInfo
@@ -34,6 +35,8 @@ def _parse_int(value: str | None) -> int | None:
     value = value.strip()
     if not value:
         return None
+    if "telegram_id" in value.lower():
+        return None
     try:
         return int(value)
     except ValueError as exc:
@@ -47,7 +50,10 @@ def _parse_admin_ids(raw: str | None) -> set[int]:
     for item in raw.split(","):
         item = item.strip()
         if item:
-            admin_id = int(item)
+            try:
+                admin_id = int(item)
+            except ValueError:
+                continue
             if admin_id not in PLACEHOLDER_IDS:
                 result.add(admin_id)
     return result
@@ -58,15 +64,21 @@ def load_config() -> BotConfig:
     if not token or token == "123456:replace_me":
         raise RuntimeError("Set BOT_TOKEN in .env before running the bot.")
 
+    owner_id = _parse_int(os.getenv("OWNER_ID"))
+    if owner_id in PLACEHOLDER_IDS:
+        owner_id = None
+
     master_chat_id = _parse_int(os.getenv("MASTER_CHAT_ID"))
     if master_chat_id in PLACEHOLDER_IDS:
         master_chat_id = None
+
     admin_ids = _parse_admin_ids(os.getenv("ADMIN_IDS"))
     if master_chat_id is not None:
         admin_ids.add(master_chat_id)
 
     return BotConfig(
         token=token,
+        owner_id=owner_id,
         master_chat_id=master_chat_id,
         admin_ids=admin_ids,
         timezone=ZoneInfo(os.getenv("TIMEZONE", "Europe/Moscow")),

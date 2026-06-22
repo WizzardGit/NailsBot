@@ -16,7 +16,7 @@ router = Router()
 
 @router.message(F.text == MENU_SERVICES)
 async def show_services_info(message: Message, store: JsonStore) -> None:
-    services = await store.load("services.json", [])
+    services = await store.list_services()
     await message.answer(services_text(services))
 
 
@@ -51,4 +51,3 @@ async def show_contacts(message: Message, config: BotConfig) -> None:
         "Instagram и карта доступны по кнопкам ниже."
     )
     await message.answer(text, reply_markup=contacts_kb(config.instagram_url, config.map_url))
-

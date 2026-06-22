@@ -5,7 +5,9 @@ from zoneinfo import ZoneInfo
 
 
 TIME_SLOTS = ["10:00", "12:00", "14:00", "16:00", "18:00"]
+WORKING_DAY_END = "20:00"
 WORKING_WEEKDAYS = {1, 2, 3, 4, 5}  # Tuesday-Saturday
+DEFAULT_SERVICE_DURATION_MIN = 60
 
 WEEKDAY_NAMES = {
     0: "понедельник",
@@ -61,6 +63,36 @@ def human_date(value: str | date) -> str:
     return f"{day.day} {MONTH_NAMES[day.month]}, {WEEKDAY_NAMES[day.weekday()]}"
 
 
+def short_date(value: str | date) -> str:
+    day = date.fromisoformat(value) if isinstance(value, str) else value
+    return day.strftime("%d.%m.%Y")
+
+
 def iter_booking_dates(today: date, horizon_days: int) -> list[date]:
     return [today + timedelta(days=offset) for offset in range(horizon_days + 1)]
 
+
+def parse_time_to_minutes(value: str) -> int:
+    hours, minutes = value.split(":", 1)
+    return int(hours) * 60 + int(minutes)
+
+
+def minutes_to_time(value: int) -> str:
+    hours, minutes = divmod(value, 60)
+    return f"{hours:02d}:{minutes:02d}"
+
+
+def add_minutes_to_time(start_time: str, duration_min: int) -> str:
+    return minutes_to_time(parse_time_to_minutes(start_time) + int(duration_min))
+
+
+def calculate_end_time(start_time: str, duration_min: int) -> str:
+    return add_minutes_to_time(start_time, duration_min)
+
+
+def intervals_overlap(start1: str, end1: str, start2: str, end2: str) -> bool:
+    return parse_time_to_minutes(start1) < parse_time_to_minutes(end2) and parse_time_to_minutes(start2) < parse_time_to_minutes(end1)
+
+
+def fits_working_day(start_time: str, duration_min: int) -> bool:
+    return parse_time_to_minutes(calculate_end_time(start_time, duration_min)) <= parse_time_to_minutes(WORKING_DAY_END)
