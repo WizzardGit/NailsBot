@@ -23,21 +23,22 @@ from app.keyboards import (
     admin_menu_kb,
     admin_services_list_kb,
     admin_services_menu_kb,
+    admins_manage_kb,
     blocked_menu_kb,
-    blocked_slots_kb,
     booking_calendar_kb,
+    cancel_booking_choice_kb,
     client_card_kb,
     clients_list_kb,
     clients_menu_kb,
-    confirm_action_kb,
     export_kb,
+    role_select_kb,
     service_confirm_kb,
     service_edit_kb,
     time_slots_kb,
 )
 from app.permissions import can_manage_roles, has_permission
 from app.schedule import TIME_SLOTS, calculate_end_time, human_date, parse_time_to_minutes, short_date, today_in
-from app.states import AdminBlockedStates, AdminBookingStates, AdminServiceStates, ClientSearchStates
+from app.states import AdminBlockedStates, AdminBookingStates, AdminRoleStates, AdminServiceStates, ClientSearchStates
 from app.storage import JsonStore
 from app.texts import (
     admin_booking_card,
@@ -184,14 +185,15 @@ async def admin_cancel_booking_prompt(callback: CallbackQuery, store: JsonStore)
         return
     name = booking.get("contact", {}).get("name") or "клиент"
     await callback.message.edit_text(
-        f"Точно отменить запись {escape(name)} на {short_date(booking['date'])} {booking['start_time']}?",
-        reply_markup=confirm_action_kb(f"adm:b:cancelok:{booking_id}", f"adm:b:view:{booking_id}"),
+        f"Точно отменить запись {escape(name)} на {short_date(booking['date'])} {booking['start_time']}?\n\n"
+        "Можно отправить клиенту стандартное уведомление или написать причину вручную.",
+        reply_markup=cancel_booking_choice_kb(booking_id),
     )
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("adm:b:cancelok:"))
-async def admin_cancel_booking(callback: CallbackQuery, store: JsonStore) -> None:
+@router.callback_query(F.data.startswith("adm:b:cancelauto:"))
+async def admin_cancel_booking_auto(callback: CallbackQuery, store: JsonStore) -> None:
     if not await require_permission(callback, store, "manage_bookings"):
         return
     booking_id = callback.data.rsplit(":", 1)[1]
@@ -203,10 +205,52 @@ async def admin_cancel_booking(callback: CallbackQuery, store: JsonStore) -> Non
         callback,
         booking,
         f"Ваша запись на {short_date(booking['date'])} в {booking['start_time']} была отменена мастером.\n"
-        "Для новой записи откройте меню бота.",
+        "Напишите мастеру, чтобы узнать подробности или подобрать новое время.",
     )
     await callback.message.edit_text(f"Запись отменена.{warning}", reply_markup=admin_back_kb())
     await callback.answer("Отменено")
+
+
+@router.callback_query(F.data.startswith("adm:b:cancelreason:"))
+async def admin_cancel_booking_reason_start(callback: CallbackQuery, state: FSMContext, store: JsonStore) -> None:
+    if not await require_permission(callback, store, "manage_bookings"):
+        return
+    booking_id = callback.data.rsplit(":", 1)[1]
+    if await store.get_booking(booking_id) is None:
+        await callback.answer("Запись не найдена", show_alert=True)
+        return
+    await state.update_data(cancel_booking_id=booking_id)
+    await state.set_state(AdminBookingStates.waiting_cancel_reason)
+    await callback.message.edit_text(
+        "Напишите текст, который получит клиент при отмене записи:",
+        reply_markup=admin_back_kb(f"adm:b:view:{booking_id}"),
+    )
+    await callback.answer()
+
+
+@router.message(AdminBookingStates.waiting_cancel_reason)
+async def admin_cancel_booking_with_reason(message: Message, state: FSMContext, store: JsonStore) -> None:
+    if not await has_permission(message.from_user.id if message.from_user else None, "manage_bookings", store):
+        await message.answer("Недоступно.")
+        await state.clear()
+        return
+    reason = (message.text or "").strip()
+    if not reason:
+        await message.answer("Причина не должна быть пустой.")
+        return
+    data = await state.get_data()
+    booking = await store.cancel_booking(data.get("cancel_booking_id", ""))
+    await state.clear()
+    if booking is None:
+        await message.answer("Запись не найдена.", reply_markup=admin_back_kb())
+        return
+    warning = await notify_client(
+        message,
+        booking,
+        f"Ваша запись на {short_date(booking['date'])} в {booking['start_time']} была отменена мастером.\n\n"
+        f"{reason}",
+    )
+    await message.answer(f"Запись отменена.{warning}", reply_markup=admin_back_kb())
 
 
 @router.callback_query(F.data.startswith("adm:b:done:"))
@@ -523,7 +567,7 @@ async def admin_clients_list(callback: CallbackQuery, store: JsonStore) -> None:
     if not await require_permission(callback, store, "manage_clients"):
         return
     clients = await store.list_clients()
-    text = "<b>Последние клиенты</b>" if clients else "<b>Клиенты</b>\n\nПока нет клиентов."
+    text = clients_results_text("Последние клиенты", clients)
     await callback.message.edit_text(text, reply_markup=clients_list_kb(clients))
     await callback.answer()
 
@@ -545,7 +589,7 @@ async def admin_clients_search(message: Message, state: FSMContext, store: JsonS
         return
     clients = await store.find_clients(message.text or "")
     await state.clear()
-    text = "<b>Результаты поиска</b>" if clients else "<b>Результаты поиска</b>\n\nНичего не найдено."
+    text = clients_results_text("Результаты поиска", clients)
     await message.answer(text, reply_markup=clients_list_kb(clients, back_callback="adm:clients"))
 
 
@@ -557,8 +601,44 @@ async def admin_client_view(callback: CallbackQuery, store: JsonStore) -> None:
     if client is None:
         await callback.answer("Клиент не найден", show_alert=True)
         return
-    await callback.message.edit_text(client_card_text(client), reply_markup=client_card_kb(client))
+    can_delete = await has_permission(callback.from_user.id if callback.from_user else None, "manage_roles", store)
+    await callback.message.edit_text(client_card_text(client), reply_markup=client_card_kb(client, can_delete=can_delete))
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm:c:del:"))
+async def admin_client_delete_prompt(callback: CallbackQuery, store: JsonStore) -> None:
+    if not await require_permission(callback, store, "manage_roles"):
+        return
+    telegram_id = int(callback.data.rsplit(":", 1)[1])
+    client = await store.get_client(telegram_id)
+    if client is None:
+        await callback.answer("Клиент не найден", show_alert=True)
+        return
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Да, удалить", callback_data=f"adm:c:delok:{telegram_id}")
+    builder.button(text="Нет, назад", callback_data=f"adm:c:view:{telegram_id}")
+    builder.adjust(1)
+    await callback.message.edit_text(
+        f"Удалить клиента {escape(client.get('display_name') or str(telegram_id))} и все его записи из базы?",
+        reply_markup=builder.as_markup(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm:c:delok:"))
+async def admin_client_delete_confirm(callback: CallbackQuery, store: JsonStore) -> None:
+    if not await require_permission(callback, store, "manage_roles"):
+        return
+    telegram_id = int(callback.data.rsplit(":", 1)[1])
+    changed, removed_count = await store.delete_client_with_bookings(telegram_id)
+    text = (
+        f"Клиент удален. Удалено записей: {removed_count}."
+        if changed
+        else "Клиент не найден."
+    )
+    await callback.message.edit_text(text, reply_markup=admin_back_kb("adm:clients"))
+    await callback.answer("Удалено" if changed else "Не найдено", show_alert=not changed)
 
 
 @router.callback_query(F.data.startswith("adm:c:hist:"))
@@ -632,10 +712,13 @@ async def admin_block_day_month(callback: CallbackQuery, store: JsonStore, confi
 
 
 @router.callback_query(F.data.startswith("adm:blk:d:date:"))
-async def admin_block_day_toggle(callback: CallbackQuery, store: JsonStore) -> None:
+async def admin_block_day_toggle(callback: CallbackQuery, store: JsonStore, config: BotConfig) -> None:
     if not await require_permission(callback, store, "manage_blocked"):
         return
     day = callback.data.rsplit(":", 1)[1]
+    if date.fromisoformat(day) < today_in(config.timezone):
+        await callback.answer("Нельзя закрыть дату раньше сегодняшнего дня", show_alert=True)
+        return
     is_blocked = await store.toggle_blocked_date(day)
     await callback.message.edit_text(
         f"{short_date(day)}: {'закрыта' if is_blocked else 'открыта'}.\n\n"
@@ -656,12 +739,15 @@ async def admin_block_slot_start(callback: CallbackQuery, state: FSMContext, sto
 
 
 @router.message(AdminBlockedStates.waiting_block_slot_date)
-async def admin_block_slot_date(message: Message, state: FSMContext) -> None:
+async def admin_block_slot_date(message: Message, state: FSMContext, config: BotConfig) -> None:
     day = (message.text or "").strip()
     try:
-        date.fromisoformat(day)
+        parsed_day = date.fromisoformat(day)
     except ValueError:
         await message.answer("Дата должна быть в формате YYYY-MM-DD.")
+        return
+    if parsed_day < today_in(config.timezone):
+        await message.answer("Нельзя закрыть дату раньше сегодняшнего дня.")
         return
     await state.update_data(block_date=day)
     await state.set_state(AdminBlockedStates.waiting_block_start_time)
@@ -796,14 +882,68 @@ async def admin_stats(callback: CallbackQuery, store: JsonStore) -> None:
 async def admin_admins(callback: CallbackQuery, store: JsonStore) -> None:
     if not await require_permission(callback, store, "manage_roles"):
         return
-    await callback.message.edit_text(admins_text(await store.get_admins()), reply_markup=admin_back_kb())
+    await callback.message.edit_text(admins_text(await store.get_admins()), reply_markup=admins_manage_kb())
     await callback.answer()
+
+
+@router.callback_query(F.data == "adm:r:start")
+async def admin_role_start(callback: CallbackQuery, state: FSMContext, store: JsonStore) -> None:
+    if not await require_permission(callback, store, "manage_roles"):
+        return
+    await state.set_state(AdminRoleStates.waiting_user_id)
+    await callback.message.edit_text(
+        "Введите Telegram ID пользователя, которому нужно выдать или изменить роль:",
+        reply_markup=admin_back_kb("adm:admins"),
+    )
+    await callback.answer()
+
+
+@router.message(AdminRoleStates.waiting_user_id)
+async def admin_role_waiting_user_id(message: Message, state: FSMContext, store: JsonStore) -> None:
+    if not await has_permission(message.from_user.id if message.from_user else None, "manage_roles", store):
+        await message.answer("Недоступно.")
+        await state.clear()
+        return
+    try:
+        telegram_id = int((message.text or "").strip())
+    except ValueError:
+        await message.answer("Telegram ID должен быть числом.")
+        return
+    await state.clear()
+    await message.answer(
+        f"Выберите роль для <code>{telegram_id}</code>:",
+        reply_markup=role_select_kb(telegram_id),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:r:role:"))
+async def admin_role_set(callback: CallbackQuery, store: JsonStore) -> None:
+    if not await require_permission(callback, store, "manage_roles"):
+        return
+    _, _, _, telegram_id_raw, role = callback.data.split(":", 4)
+    ok, text = await store.set_role(int(telegram_id_raw), role, callback.from_user)
+    await callback.message.edit_text(text, reply_markup=admins_manage_kb())
+    await callback.answer("Сохранено" if ok else "Не сохранено", show_alert=not ok)
 
 
 async def show_bookings_range(callback: CallbackQuery, store: JsonStore, title: str, start: str, end: str) -> None:
     bookings = await store.list_bookings(start, end)
     await callback.message.edit_text(format_booking_list(title, bookings), reply_markup=admin_booking_list_kb(bookings))
     await callback.answer()
+
+
+def clients_results_text(title: str, clients: list[dict[str, Any]]) -> str:
+    if not clients:
+        return f"<b>{escape(title)}</b>\n\nНичего не найдено."
+    lines = [f"<b>{escape(title)}</b>", f"Найдено: <b>{len(clients)}</b>", ""]
+    for index, client in enumerate(clients, start=1):
+        username = f"@{client['username']}" if client.get("username") else "без username"
+        phone = client.get("phone") or "без телефона"
+        lines.append(
+            f"{index}. {escape(client.get('display_name') or 'Клиент')} — "
+            f"{escape(phone)} — {escape(username)} — <code>{client['telegram_id']}</code>"
+        )
+    return "\n".join(lines)
 
 
 async def send_admin_pick_calendar(callback: CallbackQuery, store: JsonStore, config: BotConfig) -> None:
@@ -902,12 +1042,12 @@ async def require_permission(callback: CallbackQuery, store: JsonStore, permissi
     return False
 
 
-async def notify_client(callback: CallbackQuery, booking: dict[str, Any], text: str) -> str:
+async def notify_client(source: CallbackQuery | Message, booking: dict[str, Any], text: str) -> str:
     telegram_id = booking.get("client", {}).get("telegram_id")
     if not telegram_id:
         return "\n\n⚠️ У клиента нет Telegram ID для уведомления."
     try:
-        await callback.bot.send_message(int(telegram_id), text)
+        await source.bot.send_message(int(telegram_id), text, parse_mode=None)
     except TelegramAPIError as exc:
         logger.warning("Could not notify client %s: %s", telegram_id, exc)
         return "\n\n⚠️ Клиенту не удалось отправить уведомление."

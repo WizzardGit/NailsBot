@@ -457,33 +457,68 @@ class JsonStore:
             self._upsert_client_from_booking_locked(booking, self._normalized_bookings_locked())
 
     async def list_clients(self, limit: int = 20) -> list[dict[str, Any]]:
-        clients = await self.load("clients.json", [])
+        async with self._lock:
+            self._rebuild_clients_locked(force=True)
+            clients = self._normalize_clients(self._read(self._path("clients.json"), []))
         return sorted(clients, key=lambda item: item.get("updated_at", ""), reverse=True)[:limit]
 
     async def find_clients(self, query: str) -> list[dict[str, Any]]:
-        query_norm = query.strip().lower().lstrip("@")
+        query_norm = _normalize_search_text(query)
         if not query_norm:
             return await self.list_clients()
-        clients = await self.load("clients.json", [])
+        async with self._lock:
+            self._rebuild_clients_locked(force=True)
+            clients = self._normalize_clients(self._read(self._path("clients.json"), []))
         result = []
         for client in clients:
-            haystack = " ".join(
-                [
-                    str(client.get("telegram_id", "")),
-                    str(client.get("username", "")),
-                    str(client.get("first_name", "")),
-                    str(client.get("last_name", "")),
-                    str(client.get("display_name", "")),
-                    str(client.get("phone", "")),
-                ]
+            haystack = _normalize_search_text(
+                " ".join(
+                    [
+                        str(client.get("telegram_id", "")),
+                        str(client.get("username", "")),
+                        str(client.get("first_name", "")),
+                        str(client.get("last_name", "")),
+                        str(client.get("display_name", "")),
+                        str(client.get("phone", "")),
+                    ]
+                )
             ).lower().lstrip("@")
             if query_norm in haystack:
                 result.append(client)
         return sorted(result, key=lambda item: item.get("updated_at", ""), reverse=True)[:20]
 
     async def get_client(self, telegram_id: int) -> dict[str, Any] | None:
-        clients = await self.load("clients.json", [])
+        async with self._lock:
+            self._rebuild_clients_locked(force=True)
+            clients = self._normalize_clients(self._read(self._path("clients.json"), []))
         return next((item for item in clients if int(item.get("telegram_id", 0)) == int(telegram_id)), None)
+
+    async def delete_client_with_bookings(self, telegram_id: int) -> tuple[bool, int]:
+        async with self._lock:
+            bookings_path = self._path("bookings.json")
+            raw_bookings = self._read(bookings_path, [])
+            services_by_id = {item["id"]: item for item in self._normalize_services(self._read(self._path("services.json"), []))}
+            kept_bookings = []
+            removed_count = 0
+            for raw_booking in raw_bookings:
+                booking = self._normalize_booking(raw_booking, services_by_id)
+                if int(booking.get("client", {}).get("telegram_id") or 0) == int(telegram_id):
+                    removed_count += 1
+                else:
+                    kept_bookings.append(raw_booking)
+
+            clients_path = self._path("clients.json")
+            clients = self._normalize_clients(self._read(clients_path, []))
+            kept_clients = [
+                client
+                for client in clients
+                if int(client.get("telegram_id", 0)) != int(telegram_id)
+            ]
+            changed = removed_count > 0 or len(kept_clients) != len(clients)
+            if changed:
+                self._write(bookings_path, kept_bookings)
+                self._write(clients_path, kept_clients)
+            return changed, removed_count
 
     async def client_bookings(self, telegram_id: int) -> list[dict[str, Any]]:
         bookings = await self.load("bookings.json", [])
@@ -621,12 +656,13 @@ class JsonStore:
             clients.append(payload)
         self._write(path, clients)
 
-    def _rebuild_clients_locked(self) -> None:
+    def _rebuild_clients_locked(self, force: bool = False) -> None:
         bookings = self._normalized_bookings_locked()
-        if not bookings:
-            return
         clients_path = self._path("clients.json")
-        if self._read(clients_path, []):
+        if not force and self._read(clients_path, []):
+            return
+        self._write(clients_path, [])
+        if not bookings:
             return
         for booking in bookings:
             self._upsert_client_from_booking_locked(booking, bookings)
@@ -893,6 +929,10 @@ def _int_or_default(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _normalize_search_text(value: Any) -> str:
+    return " ".join(str(value or "").replace("@", " ").casefold().split())
 
 
 def utc_now() -> str:

@@ -102,7 +102,10 @@ def booking_calendar_kb(
 
             if callback_prefix != "book":
                 is_selectable = today <= current <= horizon_end
-                label = "×" if current_iso in blocked_dates else str(day_number)
+                if current < today or current > horizon_end:
+                    label = " "
+                else:
+                    label = "×" if current_iso in blocked_dates else str(day_number)
             else:
                 is_past_or_too_far = current < today or current > horizon_end
                 is_full_or_blocked = current_iso in blocked_dates or len(unavailable) >= len(TIME_SLOTS)
@@ -359,19 +362,55 @@ def clients_menu_kb() -> InlineKeyboardMarkup:
 def clients_list_kb(clients: list[dict[str, Any]], back_callback: str = "adm:clients") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for client in clients:
-        name = client.get("display_name") or f"id {client['telegram_id']}"
-        builder.button(text=name, callback_data=f"adm:c:view:{client['telegram_id']}")
+        builder.button(text=client_button_label(client), callback_data=f"adm:c:view:{client['telegram_id']}")
     builder.button(text="⬅️ Назад", callback_data=back_callback)
     builder.adjust(1)
     return builder.as_markup()
 
 
-def client_card_kb(client: dict[str, Any]) -> InlineKeyboardMarkup:
+def client_card_kb(client: dict[str, Any], can_delete: bool = False) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(text="📜 История записей", callback_data=f"adm:c:hist:{client['telegram_id']}")]]
     if client.get("username"):
         rows.append([InlineKeyboardButton(text="📞 Написать", url=f"https://t.me/{client['username']}")])
+    if can_delete:
+        rows.append([InlineKeyboardButton(text="🗑 Удалить клиента", callback_data=f"adm:c:del:{client['telegram_id']}")])
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:clients")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def client_button_label(client: dict[str, Any]) -> str:
+    name = client.get("display_name") or f"id {client['telegram_id']}"
+    username = f"@{client['username']}" if client.get("username") else "без username"
+    phone = client.get("phone") or "без телефона"
+    label = f"{name} · {phone} · {username} · {client['telegram_id']}"
+    return label if len(label) <= 64 else f"{label[:61]}..."
+
+
+def admins_manage_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Добавить/изменить роль", callback_data="adm:r:start")
+    builder.button(text="⬅️ Назад", callback_data="adm:menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def role_select_kb(telegram_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⭐ super_admin", callback_data=f"adm:r:role:{telegram_id}:super_admin")
+    builder.button(text="🛠 admin", callback_data=f"adm:r:role:{telegram_id}:admin")
+    builder.button(text="👁 viewer", callback_data=f"adm:r:role:{telegram_id}:viewer")
+    builder.button(text="⬅️ Назад", callback_data="adm:admins")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def cancel_booking_choice_kb(booking_id: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Отменить с авто-текстом", callback_data=f"adm:b:cancelauto:{booking_id}")
+    builder.button(text="Написать причину", callback_data=f"adm:b:cancelreason:{booking_id}")
+    builder.button(text="⬅️ Назад", callback_data=f"adm:b:view:{booking_id}")
+    builder.adjust(1)
+    return builder.as_markup()
 
 
 def export_kb() -> InlineKeyboardMarkup:
