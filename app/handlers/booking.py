@@ -135,7 +135,8 @@ async def choose_date(callback: CallbackQuery, state: FSMContext, store: JsonSto
         await callback.answer("Эта дата недоступна для записи", show_alert=True)
         return
 
-    available_slots = await store.available_time_slots(date_iso, duration)
+    statuses = await store.time_slot_statuses(date_iso, duration)
+    available_slots = [slot for slot, status in statuses.items() if status == "available"]
     if date_iso in blocked_dates or not available_slots:
         await callback.answer("На эту дату уже нет свободных окон", show_alert=True)
         return
@@ -145,8 +146,9 @@ async def choose_date(callback: CallbackQuery, state: FSMContext, store: JsonSto
     await callback.message.edit_text(
         f"<b>{human_date(date_iso)}</b>\n"
         "Выберите свободное время.\n"
-        "× — время уже занято или запись не помещается по длительности.",
-        reply_markup=time_slots_kb(available_slots),
+        f"Длительность выбранных услуг: <b>{duration} мин</b>.\n"
+        "× — причина указана на кнопке.",
+        reply_markup=time_slots_kb(available_slots, unavailable_reasons=statuses),
     )
     await callback.answer()
 

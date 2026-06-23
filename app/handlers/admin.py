@@ -302,15 +302,23 @@ async def admin_reschedule_date(callback: CallbackQuery, state: FSMContext, stor
         return
     day = callback.data.rsplit(":", 1)[1]
     duration = int(booking.get("total_duration_min", 60))
-    available = await store.available_time_slots(day, duration, exclude_booking_id=booking["id"])
+    statuses = await store.time_slot_statuses(day, duration, exclude_booking_id=booking["id"])
+    available = [slot for slot, status in statuses.items() if status == "available"]
     if not available:
         await callback.answer("На эту дату нет свободного времени", show_alert=True)
         return
     await state.update_data(new_date=day)
     await state.set_state(AdminBookingStates.choosing_reschedule_time)
     await callback.message.edit_text(
-        f"<b>{human_date(day)}</b>\nВыберите новое время:",
-        reply_markup=time_slots_kb(available, callback_prefix="adm:b:restime", back_callback=f"adm:b:res:{booking['id']}"),
+        f"<b>{human_date(day)}</b>\n"
+        f"Длительность записи: <b>{duration} мин</b>.\n"
+        "Выберите новое время:",
+        reply_markup=time_slots_kb(
+            available,
+            callback_prefix="adm:b:restime",
+            back_callback=f"adm:b:res:{booking['id']}",
+            unavailable_reasons=statuses,
+        ),
     )
     await callback.answer()
 

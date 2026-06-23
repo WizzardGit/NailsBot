@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 
 TIME_SLOTS = ["10:00", "12:00", "14:00", "16:00", "18:00"]
-WORKING_DAY_END = "20:00"
+WORKING_DAY_END = "22:00"
 WORKING_WEEKDAYS = {1, 2, 3, 4, 5}  # Tuesday-Saturday
 DEFAULT_SERVICE_DURATION_MIN = 60
 

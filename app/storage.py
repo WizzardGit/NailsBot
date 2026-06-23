@@ -376,6 +376,46 @@ class JsonStore:
                     result.append(start_time)
             return result
 
+    async def time_slot_statuses(
+        self,
+        day: str,
+        duration_min: int,
+        exclude_booking_id: str | None = None,
+    ) -> dict[str, str]:
+        async with self._lock:
+            bookings = self._normalized_bookings_locked()
+            blocked_dates = set(self._read(self._path("blocked_dates.json"), []))
+            blocked_slots = self._normalize_blocked_slots(self._read(self._path("blocked_slots.json"), []))
+            if day in blocked_dates:
+                return {time_slot: "closed" for time_slot in TIME_SLOTS}
+
+            statuses: dict[str, str] = {}
+            for start_time in TIME_SLOTS:
+                if not fits_working_day(start_time, duration_min):
+                    statuses[start_time] = "not_fit"
+                    continue
+
+                end_time = calculate_end_time(start_time, duration_min)
+                if any(
+                    slot.get("date") == day and intervals_overlap(start_time, end_time, slot["start_time"], slot["end_time"])
+                    for slot in blocked_slots
+                ):
+                    statuses[start_time] = "closed"
+                    continue
+
+                if any(
+                    booking.get("id") != exclude_booking_id
+                    and booking.get("status") == "confirmed"
+                    and booking.get("date") == day
+                    and intervals_overlap(start_time, end_time, booking["start_time"], booking["end_time"])
+                    for booking in bookings
+                ):
+                    statuses[start_time] = "busy"
+                    continue
+
+                statuses[start_time] = "available"
+            return statuses
+
     async def booked_times(self, day: str) -> set[str]:
         available = set(await self.available_time_slots(day, DEFAULT_SERVICE_DURATION_MIN))
         return {slot for slot in TIME_SLOTS if slot not in available}

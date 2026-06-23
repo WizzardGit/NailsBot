@@ -154,17 +154,27 @@ def time_slots_kb(
     available_slots: Iterable[str],
     callback_prefix: str = "book:time",
     back_callback: str = "book:change_date",
+    unavailable_reasons: dict[str, str] | None = None,
 ) -> InlineKeyboardMarkup:
     available = set(available_slots)
+    unavailable_reasons = unavailable_reasons or {}
     builder = InlineKeyboardBuilder()
     for time_slot in TIME_SLOTS:
         if time_slot in available:
             builder.button(text=f"✓ {time_slot}", callback_data=f"{callback_prefix}:{time_slot}")
         else:
-            builder.button(text=f"× {time_slot} занято", callback_data="noop")
+            builder.button(text=f"× {time_slot} {time_slot_reason_text(unavailable_reasons.get(time_slot))}", callback_data="noop")
     builder.button(text="Выбрать другую дату", callback_data=back_callback)
     builder.adjust(2, 2, 1, 1)
     return builder.as_markup()
+
+
+def time_slot_reason_text(reason: str | None) -> str:
+    if reason == "not_fit":
+        return "не помещается"
+    if reason == "closed":
+        return "закрыто"
+    return "занято"
 
 
 def confirm_booking_kb() -> InlineKeyboardMarkup:
