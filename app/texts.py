@@ -248,9 +248,11 @@ def service_card_text(service: dict[str, Any]) -> str:
 def client_card_text(client: dict[str, Any]) -> str:
     username = f"@{client['username']}" if client.get("username") else "без username"
     last_booking = short_date(client["last_booking_at"]) if client.get("last_booking_at") else "нет"
+    telegram_name = client.get("telegram_name") or "не указано"
     return (
         f"<b>👤 {escape(client.get('display_name') or 'Клиент')}</b>\n\n"
         f"Telegram: <b>{escape(username)}</b>\n"
+        f"Имя в Telegram: <b>{escape(telegram_name)}</b>\n"
         f"ID: <code>{client.get('telegram_id')}</code>\n"
         f"Телефон: <b>{escape(client.get('phone') or 'не указан')}</b>\n"
         f"Записей всего: <b>{client.get('bookings_count', 0)}</b>\n"

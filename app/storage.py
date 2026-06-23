@@ -479,10 +479,12 @@ class JsonStore:
                         str(client.get("first_name", "")),
                         str(client.get("last_name", "")),
                         str(client.get("display_name", "")),
+                        str(client.get("telegram_name", "")),
                         str(client.get("phone", "")),
+                        " ".join(client.get("contact_names", [])),
                     ]
                 )
-            ).lower().lstrip("@")
+            )
             if query_norm in haystack:
                 result.append(client)
         return sorted(result, key=lambda item: item.get("updated_at", ""), reverse=True)[:20]
@@ -638,12 +640,31 @@ class JsonStore:
         last_booking = related_sorted[-1] if related_sorted else booking
         now = utc_now()
         existing = next((item for item in clients if int(item.get("telegram_id", 0)) == telegram_id), None)
+        contact_name = str(contact.get("name") or "").strip()
+        contact_names = sorted(
+            {
+                str(item.get("contact", {}).get("name") or "").strip()
+                for item in related
+                if str(item.get("contact", {}).get("name") or "").strip()
+            },
+            key=str.casefold,
+        )
+        telegram_name = " ".join(
+            part
+            for part in [
+                str(client.get("first_name") or "").strip(),
+                str(client.get("last_name") or "").strip(),
+            ]
+            if part
+        ) or str(client.get("display_name") or "").strip()
         payload = {
             "telegram_id": telegram_id,
             "username": client.get("username") or "",
             "first_name": client.get("first_name") or "",
             "last_name": client.get("last_name") or "",
-            "display_name": client.get("display_name") or contact.get("name") or client.get("first_name") or f"id {telegram_id}",
+            "display_name": contact_name or client.get("display_name") or client.get("first_name") or f"id {telegram_id}",
+            "telegram_name": telegram_name,
+            "contact_names": contact_names,
             "phone": contact.get("phone") or "",
             "bookings_count": len(related),
             "last_booking_at": last_booking.get("date", ""),
@@ -870,6 +891,12 @@ class JsonStore:
                     "first_name": str(item.get("first_name") or ""),
                     "last_name": str(item.get("last_name") or ""),
                     "display_name": str(item.get("display_name") or item.get("first_name") or f"id {telegram_id}"),
+                    "telegram_name": str(item.get("telegram_name") or ""),
+                    "contact_names": [
+                        str(name)
+                        for name in (item.get("contact_names") if isinstance(item.get("contact_names"), list) else [])
+                        if str(name).strip()
+                    ],
                     "phone": str(item.get("phone") or ""),
                     "bookings_count": _int_or_default(item.get("bookings_count"), 0),
                     "last_booking_at": str(item.get("last_booking_at") or ""),
